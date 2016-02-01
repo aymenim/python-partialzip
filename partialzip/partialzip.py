@@ -1,11 +1,10 @@
-
-
 import urllib2
-import struct 
+import struct
 import cStringIO
-import os , sys
+import os, sys
 import biplist
 import zlib
+
 # taken from the standard library
 
 # The "end of central directory" structure, magic number, size, and indices
@@ -76,288 +75,287 @@ _FH_EXTRA_FIELD_LENGTH = 11
 ZIP_STORED = 0
 ZIP_DEFLATED = 8
 
-class ZipInfo (object):
 
-	def __init__(self, filename="NoName", date_time=(1980,1,1,0,0,0)):
-		self.orig_filename = filename   # Original file name in archive
+class ZipInfo(object):
+    def __init__(self, filename="NoName", date_time=(1980, 1, 1, 0, 0, 0)):
+        self.orig_filename = filename  # Original file name in archive
 
-		# Terminate the file name at the first null byte.  Null bytes in file
-		# names are used as tricks by viruses in archives.
-		null_byte = filename.find(chr(0))
-		if null_byte >= 0:
-			filename = filename[0:null_byte]
-		# This is used to ensure paths in generated ZIP files always use
-		# forward slashes as the directory separator, as required by the
-		# ZIP format specification.
-		if os.sep != "/" and os.sep in filename:
-			filename = filename.replace(os.sep, "/")
+        # Terminate the file name at the first null byte.  Null bytes in file
+        # names are used as tricks by viruses in archives.
+        null_byte = filename.find(chr(0))
+        if null_byte >= 0:
+            filename = filename[0:null_byte]
+        # This is used to ensure paths in generated ZIP files always use
+        # forward slashes as the directory separator, as required by the
+        # ZIP format specification.
+        if os.sep != "/" and os.sep in filename:
+            filename = filename.replace(os.sep, "/")
 
-		self.filename = filename        # Normalized file name
-		self.date_time = date_time      # year, month, day, hour, min, sec
+        self.filename = filename  # Normalized file name
+        self.date_time = date_time  # year, month, day, hour, min, sec
 
-		if date_time[0] < 1980:
-			raise ValueError('ZIP does not support timestamps before 1980')
+        if date_time[0] < 1980:
+            raise ValueError('ZIP does not support timestamps before 1980')
 
-		# Standard values:
-		self.compress_type = ZIP_STORED # Type of compression for the file
-		self.comment = ""               # Comment for each file
-		self.extra = ""                 # ZIP extra data
-		if sys.platform == 'win32':
-			self.create_system = 0          # System which created ZIP archive
-		else:
-			# Assume everything else is unix-y
-			self.create_system = 3          # System which created ZIP archive
-		self.create_version = 20        # Version which created ZIP archive
-		self.extract_version = 20       # Version needed to extract archive
-		self.reserved = 0               # Must be zero
-		self.flag_bits = 0              # ZIP flag bits
-		self.volume = 0                 # Volume number of file header
-		self.internal_attr = 0          # Internal attributes
-		self.external_attr = 0          # External file attributes
-		# Other attributes are set by class ZipFile:
-		# header_offset         Byte offset to the file header
-		# CRC                   CRC-32 of the uncompressed file
-		# compress_size         Size of the compressed file
-		# file_size             Size of the uncompressed file
+        # Standard values:
+        self.compress_type = ZIP_STORED  # Type of compression for the file
+        self.comment = ""  # Comment for each file
+        self.extra = ""  # ZIP extra data
+        if sys.platform == 'win32':
+            self.create_system = 0  # System which created ZIP archive
+        else:
+            # Assume everything else is unix-y
+            self.create_system = 3  # System which created ZIP archive
+        self.create_version = 20  # Version which created ZIP archive
+        self.extract_version = 20  # Version needed to extract archive
+        self.reserved = 0  # Must be zero
+        self.flag_bits = 0  # ZIP flag bits
+        self.volume = 0  # Volume number of file header
+        self.internal_attr = 0  # Internal attributes
+        self.external_attr = 0  # External file attributes
 
-	def _decodeFilename(self):
-		if self.flag_bits & 0x800:
-			return self.filename.decode('utf-8')
-		else:
-			return self.filename
+    # Other attributes are set by class ZipFile:
+    # header_offset         Byte offset to the file header
+    # CRC                   CRC-32 of the uncompressed file
+    # compress_size         Size of the compressed file
+    # file_size             Size of the uncompressed file
+
+    def _decodeFilename(self):
+        if self.flag_bits & 0x800:
+            return self.filename.decode('utf-8')
+        else:
+            return self.filename
 
 
-def get_data(url , start , end=0):
-	byte_range = "bytes=%d-%d" %(start , end) if end else "bytes=%d-"%(start ,)
-	headers = {"Range" : byte_range}
-	req = urllib2.Request(url , headers = headers)
-	response = urllib2.urlopen(req)
+def get_data( file_url, start, end=0):
+    byte_range = "bytes=%d-%d" % (start, end) if end else "bytes=%d-" % (start,)
+    headers = {"Range": byte_range}
+    req = urllib2.Request(file_url, headers=headers)
+    response = urllib2.urlopen(req)
 
-	return response.read()
+    return response.read()
+
 
 def get_filesize_url(url):
-	req = urllib2.Request(url)
-	response = urllib2.urlopen(req)
-	return response.headers.getheader('content-length')
-
-def get_end_record_data(url , total_file_size):
-	print "[*] size of the cd:", sizeEndCentDir 
-	cd_data = get_data(url , total_file_size - sizeEndCentDir)
-
-	print "[*] size of the cd data:", len(cd_data)
-	hexdump(cd_data)
+    req = urllib2.Request(url)
+    response = urllib2.urlopen(req)
+    return response.headers.getheader('content-length')
 
 
-	# directly taken from the python standard library ZipFile class of zipfile module line 219 - 228
-	if (len(cd_data) == sizeEndCentDir and cd_data[0:4] == stringEndArchive and cd_data[-2:] == b"\000\000"):
-		# the signature is correct and there's no comment, unpack structure
-		endrec = struct.unpack(structEndArchive, cd_data)
-		endrec=list(endrec)
+def get_end_record_data(url, total_file_size):
+    print "[*] size of the cd:", sizeEndCentDir
+    cd_data = get_data(url, total_file_size - sizeEndCentDir)
 
-		# Append a blank comment and record start offset
-		endrec.append("")
-		endrec.append(total_file_size - sizeEndCentDir)
+    print "[*] size of the cd data:", len(cd_data)
+    hexdump(cd_data)
+
+    # directly taken from the python standard library ZipFile class of zipfile module line 219 - 228
+    if len(cd_data) == sizeEndCentDir and cd_data[0:4] == stringEndArchive and cd_data[-2:] == b"\000\000":
+        # the signature is correct and there's no comment, unpack structure
+        endrec = struct.unpack(structEndArchive, cd_data)
+        endrec = list(endrec)
+
+        # Append a blank comment and record start offset
+        endrec.append("")
+        endrec.append(total_file_size - sizeEndCentDir)
+
+        print "[*] end record data ", endrec
+
+        return endrec
 
 
-		print "[*] end record data ", endrec
+def get_central_directory(url, size, offset):
+    cd = get_data(url, offset, offset + size - 1)  # offset point to the first byte ...
 
-		return endrec
+    print "[*] size of the central directory:", len(cd)
+    # hexdump(cd)
 
-def get_central_directory(url , size , offset):
-	cd = get_data(url , offset , offset + size -1 ) # offset point to the first byte ...
+    return cd
 
-	print "[*] size of the central directory:", len(cd)
-	# hexdump(cd)
-
-	return cd
 
 # directly taken from the python standard library ZipFile class
 def parse_central_directory(data):
-	size_cd = len(data)
-	fp = cStringIO.StringIO(data)
-	total = 0
-	filelist = []
-	NameToInfo = {}
-	while total < size_cd:
-		centdir = fp.read(sizeCentralDir)
+    size_cd = len(data)
+    fp = cStringIO.StringIO(data)
+    total = 0
+    filelist = []
+    NameToInfo = {}
+    while total < size_cd:
+        centdir = fp.read(sizeCentralDir)
 
-		if len(centdir) != sizeCentralDir:
-			raise Exception("Truncated central directory")
+        if len(centdir) != sizeCentralDir:
+            raise Exception("Truncated central directory")
 
-		centdir = struct.unpack(structCentralDir, centdir)
-		if centdir[_CD_SIGNATURE] != stringCentralDir:
-			raise Exception("Bad magic number for central directory")
+        centdir = struct.unpack(structCentralDir, centdir)
+        if centdir[_CD_SIGNATURE] != stringCentralDir:
+            raise Exception("Bad magic number for central directory")
 
-		filename = fp.read(centdir[_CD_FILENAME_LENGTH])
+        filename = fp.read(centdir[_CD_FILENAME_LENGTH])
 
-		# print "[**]", filename
+        # print "[**]", filename
 
-		# Create ZipInfo instance to store file information
-		x = ZipInfo(filename)
-		x.extra = fp.read(centdir[_CD_EXTRA_FIELD_LENGTH])
-		x.comment = fp.read(centdir[_CD_COMMENT_LENGTH])
-		x.header_offset = centdir[_CD_LOCAL_HEADER_OFFSET]
-		(x.create_version, x.create_system, x.extract_version, x.reserved,
-			x.flag_bits, x.compress_type, t, d,
-			x.CRC, x.compress_size, x.file_size) = centdir[1:12]
-		x.volume, x.internal_attr, x.external_attr = centdir[15:18]
-		# Convert date/time code to (year, month, day, hour, min, sec)
-		x._raw_time = t
-		x.date_time = ( (d>>9)+1980, (d>>5)&0xF, d&0x1F, t>>11, (t>>5)&0x3F, (t&0x1F) * 2 )
+        # Create ZipInfo instance to store file information
+        x = ZipInfo(filename)
+        x.extra = fp.read(centdir[_CD_EXTRA_FIELD_LENGTH])
+        x.comment = fp.read(centdir[_CD_COMMENT_LENGTH])
+        x.header_offset = centdir[_CD_LOCAL_HEADER_OFFSET]
+        (x.create_version, x.create_system, x.extract_version, x.reserved,
+         x.flag_bits, x.compress_type, t, d,
+         x.CRC, x.compress_size, x.file_size) = centdir[1:12]
+        x.volume, x.internal_attr, x.external_attr = centdir[15:18]
+        # Convert date/time code to (year, month, day, hour, min, sec)
+        x._raw_time = t
+        x.date_time = ((d >> 9) + 1980, (d >> 5) & 0xF, d & 0x1F, t >> 11, (t >> 5) & 0x3F, (t & 0x1F) * 2)
 
-		# x._decodeExtra()
-		x.header_offset = x.header_offset + 0#concat
-		x.filename = x._decodeFilename()
-		# print "[*]", x.filename , "offset >>" , x.header_offset
-		filelist.append(x)
-		NameToInfo[x.filename] = x
+        # x._decodeExtra()
+        x.header_offset = x.header_offset + 0  # concat
+        x.filename = x._decodeFilename()
+        # print "[*]", x.filename , "offset >>" , x.header_offset
+        filelist.append(x)
+        NameToInfo[x.filename] = x
 
-		# update total bytes read from central directory
-		total = (total + sizeCentralDir + centdir[_CD_FILENAME_LENGTH]
-				 + centdir[_CD_EXTRA_FIELD_LENGTH]
-				 + centdir[_CD_COMMENT_LENGTH])
-	return filelist
-
-def local_header_parse(url , zipinfo):
-	print "sizeFileHeader" , sizeFileHeader , zipinfo.compress_type
-	print "fetching ", ( sizeFileHeader + zipinfo.compress_size -1)
-	# data = get_data(url , zipinfo.header_offset , zipinfo.header_offset + sizeFileHeader + zipinfo.compress_size + 30 )
+        # update total bytes read from central directory
+        total = (total + sizeCentralDir + centdir[_CD_FILENAME_LENGTH]
+                 + centdir[_CD_EXTRA_FIELD_LENGTH]
+                 + centdir[_CD_COMMENT_LENGTH])
+    return filelist
 
 
-	# get the header
-	data = get_data(url , zipinfo.header_offset , zipinfo.header_offset + sizeFileHeader - 1)
-	print "header"
-	hexdump(data)
-	fheader = struct.unpack(structFileHeader, data)
-
-	print "[*] local header" , fheader
-
-	
-
-	# if len(cd) != sizeFileHeader:
-	# 	raise Exception("Truncated file header")
-	
-
-	# print "[*] local file header" , fheader
-
-	# if fheader[_FH_SIGNATURE] != stringFileHeader:
-	# 	raise Exception("Bad magic number for file header")
-
-	# if fheader[_FH_EXTRA_FIELD_LENGTH]:
-	# 	fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
+def local_header_parse(url, zipinfo):
+    print "sizeFileHeader", sizeFileHeader, zipinfo.compress_type
+    print "fetching ", (sizeFileHeader + zipinfo.compress_size - 1)
+    # data = get_data(url , zipinfo.header_offset , zipinfo.header_offset + sizeFileHeader + zipinfo.compress_size + 30 )
 
 
-	data = get_data(url , zipinfo.header_offset + sizeFileHeader , zipinfo.header_offset + sizeFileHeader +  fheader[_FH_FILENAME_LENGTH] + fheader[_FH_EXTRA_FIELD_LENGTH] + zipinfo.compress_size -1)
-	# hexdump(data)
-	fp = cStringIO.StringIO(data)
+    # get the header
+    data = get_data(url, zipinfo.header_offset, zipinfo.header_offset + sizeFileHeader - 1)
+    print "header"
+    hexdump(data)
+    fheader = struct.unpack(structFileHeader, data)
+
+    print "[*] local header", fheader
+
+    # if len(cd) != sizeFileHeader:
+    # 	raise Exception("Truncated file header")
 
 
-	print "getting>>>" ,((zipinfo.header_offset + sizeFileHeader +  fheader[_FH_EXTRA_FIELD_LENGTH] + fheader[_FH_EXTRA_FIELD_LENGTH] + zipinfo.compress_size -1)- (zipinfo.header_offset + sizeFileHeader ))
-	fname = fp.read(fheader[_FH_FILENAME_LENGTH])
+    # print "[*] local file header" , fheader
 
-	print "[*] filename from local header" , fname
+    # if fheader[_FH_SIGNATURE] != stringFileHeader:
+    # 	raise Exception("Bad magic number for file header")
 
-
-	if fheader[_FH_EXTRA_FIELD_LENGTH]:
-		fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
-	
-	header_bytes = zipinfo.compress_size - zipinfo.file_size
-	plist_data = None
-	if header_bytes > 0:
-		print "[*] header bytes" , header_bytes
-		# print header_bytes
-		fp.read(header_bytes)
-
-		plist_data = fp.read(zipinfo.file_size)
-		hexdump(plist_data)
-		if len(plist_data) != zipinfo.file_size:
-			print "header bytes"
-			return None
-		print "read" , len(plist_data)
-
-	else:
-		decompressor = zlib.decompressobj(-15)
-		return decompressor.decompress(fp.read() , zipinfo.file_size)
+    # if fheader[_FH_EXTRA_FIELD_LENGTH]:
+    # 	fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
 
 
-	return plist_data
-	
+    data = get_data(url, zipinfo.header_offset + sizeFileHeader,
+                    zipinfo.header_offset + sizeFileHeader + fheader[_FH_FILENAME_LENGTH] + fheader[
+                        _FH_EXTRA_FIELD_LENGTH] + zipinfo.compress_size - 1)
+    # hexdump(data)
+    fp = cStringIO.StringIO(data)
+
+    print "getting>>>", ((zipinfo.header_offset + sizeFileHeader + fheader[_FH_EXTRA_FIELD_LENGTH] + fheader[
+        _FH_EXTRA_FIELD_LENGTH] + zipinfo.compress_size - 1) - (zipinfo.header_offset + sizeFileHeader))
+    fname = fp.read(fheader[_FH_FILENAME_LENGTH])
+
+    print "[*] filename from local header", fname
+
+    if fheader[_FH_EXTRA_FIELD_LENGTH]:
+        fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
+
+    header_bytes = zipinfo.compress_size - zipinfo.file_size
+    plist_data = None
+    if header_bytes > 0:
+        print "[*] header bytes", header_bytes
+        # print header_bytes
+        fp.read(header_bytes)
+
+        plist_data = fp.read(zipinfo.file_size)
+        hexdump(plist_data)
+        if len(plist_data) != zipinfo.file_size:
+            print "header bytes"
+            return None
+        print "read", len(plist_data)
+
+    else:
+        decompressor = zlib.decompressobj(-15)
+        return decompressor.decompress(fp.read(), zipinfo.file_size)
+
+    return plist_data
+
+
 def readable_size(size):
-	size = float(size)
-	for size_name in ["bytes" ,"KB" , "MB" , "GB" , "TB" , "PB" , "EB" , "ZB" , "YB"]:
-		if size < 1024.0:
-			return "%.2f %s" %(size , size_name)
-		size = size / 1024.0
+    size = float(size)
+    for size_name in ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]:
+        if size < 1024.0:
+            return "%.2f %s" % (size, size_name)
+        size = size / 1024.0
 
-	return "%.2f %s" %(size , "humngus!!")
+    return "%.2f %s" % (size, "humngus!!")
+
 
 # this is a pretty hex dumping function directly taken from
 # http://code.activestate.com/recipes/142812-hex-dumper/
 def hexdump(src, length=16):
-	result = []
-	digits = 4 if isinstance(src, unicode) else 2
+    result = []
+    digits = 4 if isinstance(src, unicode) else 2
 
-	for i in xrange(0, len(src), length):
-	   s = src[i:i+length]
-	   hexa = b' '.join(["%0*X" % (digits, ord(x))  for x in s])
-	   text = b''.join([x if 0x20 <= ord(x) < 0x7F else b'.'  for x in s])
-	   result.append( b"%04X   %-*s   %s" % (i, length*(digits + 1), hexa, text) )
+    for i in xrange(0, len(src), length):
+        s = src[i:i + length]
+        hexa = b' '.join(["%0*X" % (digits, ord(x)) for x in s])
+        text = b''.join([x if 0x20 <= ord(x) < 0x7F else b'.' for x in s])
+        result.append(b"%04X   %-*s   %s" % (i, length * (digits + 1), hexa, text))
 
-	print b'\n'.join(result)
+    print b'\n'.join(result)
+
 
 def main(url):
-	total_file_size =  int(get_filesize_url(url))
-	print "[*] total file size:", readable_size(total_file_size)
+    total_file_size = int(get_filesize_url(url))
+    print "[*] total file size:", readable_size(total_file_size)
 
+    endrec = get_end_record_data(url, total_file_size)
 
-	endrec =  get_end_record_data(url , total_file_size)
+    size_cd = endrec[_ECD_SIZE]  # bytes in central directory
+    offset_cd = endrec[_ECD_OFFSET]  # offset of central directory
 
+    print "[*] size of the central directory ", readable_size(size_cd), "offset", readable_size(offset_cd)
 
-	size_cd = endrec[_ECD_SIZE]             # bytes in central directory
-	offset_cd = endrec[_ECD_OFFSET]         # offset of central directory
+    central_directory = get_central_directory(url, size_cd, offset_cd)
+    concat = endrec[_ECD_LOCATION] - size_cd - offset_cd
+    print "[!!] concat", concat
+    file_list = parse_central_directory(central_directory)
 
-	print "[*] size of the central directory ", readable_size(size_cd) , "offset" , readable_size(offset_cd)
+    for x in file_list:
+        print x.filename
+        if x.filename.find(".app/Info.plist") != -1:
+            print "[***] file found", x.filename, "header offset:", x.header_offset, "compressed size:", x.compress_size, "file size:", x.file_size
+            data = local_header_parse(url, x)
+            info_plist = biplist.readPlistFromString(data)
 
-	central_directory = get_central_directory(url , size_cd , offset_cd)
-	concat = endrec[_ECD_LOCATION] - size_cd - offset_cd
-	print "[!!] concat", concat
-	file_list = parse_central_directory(central_directory)
+            if not info_plist:
+                print "[!!]  Error getting info plist"
+                return None
+            # break
+            urlschemes = []
+            if info_plist.has_key('CFBundleURLTypes'):
+                for urltype in info_plist['CFBundleURLTypes']:
+                    if urltype.has_key('CFBundleURLSchemes'):
+                        urlschemes.extend(urltype['CFBundleURLSchemes'])
+            else:
+                print "[!!]  NO URL SCHEME!! What a waste!!"
 
-	for x in file_list:
-		print x.filename
-		if x.filename.find(".app/Info.plist") != -1:
-			print "[***] file found" , x.filename , "header offset:",x.header_offset,"compressed size:", x.compress_size, "file size:",x.file_size
-			data = local_header_parse(url , x)
-			info_plist =  biplist.readPlistFromString(data)
+            print urlschemes
+            return [info_plist['CFBundleName']].extend(urlschemes)
+        # break
 
-			if not info_plist: 
-				print "[!!]  Error getting info plist"
-				return None
-				# break
-			urlschemes = []
-			if info_plist.has_key('CFBundleURLTypes'):
-				for urltype in info_plist['CFBundleURLTypes']:
-					if urltype.has_key('CFBundleURLSchemes'):
-						urlschemes.extend(urltype['CFBundleURLSchemes'])
-			else:
-				print "[!!]  NO URL SCHEME!! What a waste!!"
+        # data = get_data(url , x.header_offset , 128)
+        # hexdump(data)
 
-			print urlschemes
-			return [info_plist['CFBundleName']].extend(urlschemes)
-			# break
-
-			# data = get_data(url , x.header_offset , 128)
-			# hexdump(data)
 
 if __name__ == '__main__':
-	if len(sys.argv) > 1 :
-		url = sys.argv[1]
-	else:
-		url = "http://appldnld.apple.com/ios9.2/031-29213-20151203-67549F46-8D8A-11E5-96EE-63618B8BECEB/iPhone5,2_9.2_13C75_Restore.ipsw"
-		# url = "http://s3.amazonaws.com/nodrmapps/336377331302.ipa?Signature=NOc5uhWMofPGGXmHt15H9LK2jgk%3D&Expires=1424361762&AWSAccessKeyId=AKIAJZKFAGJVMSQ3RGMQ"
-		# "http://s3.amazonaws.com/nodrmapps/454638411191.ipa?Signature=4HFHjRBen93J9xIiqWjoYyt7cRU%3D&Expires=1424360762&AWSAccessKeyId=AKIAJZKFAGJVMSQ3RGMQ"
-		# "http://s3.amazonaws.com/nodrmapps/327630330363.ipa?Signature=mnpM63fhR%2FmK5E74aEAK5LTFWH0%3D&Expires=1424336028&AWSAccessKeyId=AKIAJZKFAGJVMSQ3RGMQ"
-	main(url)
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        url = "http://appldnld.apple.com/ios9.2/031-29213-20151203-67549F46-8D8A-11E5-96EE-63618B8BECEB/iPhone5,2_9.2_13C75_Restore.ipsw"
 
-
-
+    main(url)
