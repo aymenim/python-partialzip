@@ -1,9 +1,15 @@
+#!/usr/bin/env python
+
+import argparse
+import cStringIO
+import os
 import urllib2
 import struct
-import cStringIO
-import os, sys
-import biplist
+import sys
 import zlib
+
+
+DEBUG = False
 
 # taken from the standard library
 
@@ -126,7 +132,6 @@ class ZipInfo(object):
         else:
             return self.filename
 
-
 def get_data( file_url, start, end=0):
     byte_range = "bytes=%d-%d" % (start, end) if end else "bytes=%d-" % (start,)
     headers = {"Range": byte_range}
@@ -135,19 +140,19 @@ def get_data( file_url, start, end=0):
 
     return response.read()
 
-
 def get_filesize_url(url):
     req = urllib2.Request(url)
     response = urllib2.urlopen(req)
     return response.headers.getheader('content-length')
 
-
 def get_end_record_data(url, total_file_size):
-    print "[*] size of the cd:", sizeEndCentDir
+    if DEBUG:
+        print "[*] size of the cd:", sizeEndCentDir
     cd_data = get_data(url, total_file_size - sizeEndCentDir)
 
-    print "[*] size of the cd data:", len(cd_data)
-    hexdump(cd_data)
+    if DEBUG:
+        print "[*] size of the cd data:", len(cd_data)
+        hexdump(cd_data)
 
     # directly taken from the python standard library ZipFile class of zipfile module line 219 - 228
     if len(cd_data) == sizeEndCentDir and cd_data[0:4] == stringEndArchive and cd_data[-2:] == b"\000\000":
@@ -159,19 +164,19 @@ def get_end_record_data(url, total_file_size):
         endrec.append("")
         endrec.append(total_file_size - sizeEndCentDir)
 
-        print "[*] end record data ", endrec
+        if DEBUG:
+            print "[*] end record data ", endrec
 
         return endrec
-
 
 def get_central_directory(url, size, offset):
     cd = get_data(url, offset, offset + size - 1)  # offset point to the first byte ...
 
-    print "[*] size of the central directory:", len(cd)
+    if DEBUG:
+        print "[*] size of the central directory:", len(cd)
     # hexdump(cd)
 
     return cd
-
 
 # directly taken from the python standard library ZipFile class
 def parse_central_directory(data):
@@ -220,33 +225,14 @@ def parse_central_directory(data):
                  + centdir[_CD_COMMENT_LENGTH])
     return filelist
 
-
-def local_header_parse(url, zipinfo):
-    print "sizeFileHeader", sizeFileHeader, zipinfo.compress_type
-    print "fetching ", (sizeFileHeader + zipinfo.compress_size - 1)
-    # data = get_data(url , zipinfo.header_offset , zipinfo.header_offset + sizeFileHeader + zipinfo.compress_size + 30 )
-
-
+def get_file_from_zip(url, zipinfo):
+    if DEBUG:
+        print "sizeFileHeader", sizeFileHeader, zipinfo.compress_type
+        print "fetching ", (sizeFileHeader + zipinfo.compress_size - 1)
+    
     # get the header
     data = get_data(url, zipinfo.header_offset, zipinfo.header_offset + sizeFileHeader - 1)
-    print "header"
-    hexdump(data)
     fheader = struct.unpack(structFileHeader, data)
-
-    print "[*] local header", fheader
-
-    # if len(cd) != sizeFileHeader:
-    # 	raise Exception("Truncated file header")
-
-
-    # print "[*] local file header" , fheader
-
-    # if fheader[_FH_SIGNATURE] != stringFileHeader:
-    # 	raise Exception("Bad magic number for file header")
-
-    # if fheader[_FH_EXTRA_FIELD_LENGTH]:
-    # 	fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
-
 
     data = get_data(url, zipinfo.header_offset + sizeFileHeader,
                     zipinfo.header_offset + sizeFileHeader + fheader[_FH_FILENAME_LENGTH] + fheader[
@@ -254,35 +240,30 @@ def local_header_parse(url, zipinfo):
     # hexdump(data)
     fp = cStringIO.StringIO(data)
 
-    print "getting>>>", ((zipinfo.header_offset + sizeFileHeader + fheader[_FH_EXTRA_FIELD_LENGTH] + fheader[
-        _FH_EXTRA_FIELD_LENGTH] + zipinfo.compress_size - 1) - (zipinfo.header_offset + sizeFileHeader))
-    fname = fp.read(fheader[_FH_FILENAME_LENGTH])
-
-    print "[*] filename from local header", fname
-
     if fheader[_FH_EXTRA_FIELD_LENGTH]:
         fp.read(fheader[_FH_EXTRA_FIELD_LENGTH])
 
     header_bytes = zipinfo.compress_size - zipinfo.file_size
     plist_data = None
-    if header_bytes > 0:
-        print "[*] header bytes", header_bytes
-        # print header_bytes
+    if zipinfo.compress_type == ZIP_STORED:
+        if DEBUG:
+            print "[*] header bytes", header_bytes
+            
         fp.read(header_bytes)
-
         plist_data = fp.read(zipinfo.file_size)
         hexdump(plist_data)
+        
         if len(plist_data) != zipinfo.file_size:
-            print "header bytes"
             return None
-        print "read", len(plist_data)
+        
+        if DEBUG:
+            print "read", len(plist_data)
 
-    else:
+    elif zipinfo.compress_type == ZIP_DEFLATED:
         decompressor = zlib.decompressobj(-15)
         return decompressor.decompress(fp.read(), zipinfo.file_size)
 
     return plist_data
-
 
 def readable_size(size):
     size = float(size)
@@ -292,7 +273,6 @@ def readable_size(size):
         size = size / 1024.0
 
     return "%.2f %s" % (size, "humngus!!")
-
 
 # this is a pretty hex dumping function directly taken from
 # http://code.activestate.com/recipes/142812-hex-dumper/
@@ -308,8 +288,27 @@ def hexdump(src, length=16):
 
     print b'\n'.join(result)
 
+def save_zip_to_file(url , zipinfo , save_path):
+    with open(save_path, 'wb') as fout:
+        data = get_file_from_zip(url , zipinfo)
+        fout.write(data)
+
+
+def print_files(file_list, pretty=False):
+    if not pretty:
+        for x in file_list:
+            if x.flag_bits == 0x8:
+                print "[*] File:", x.filename , "compressed size:", readable_size(x.compress_size), "actual size:", readable_size(x.file_size)
+            elif x.flag_bits == 0:
+                print "[*] Directory:", x.filename
+            else:
+                print "[!] Unknown type", x.filename
+    else:
+        print "[:(] not implemented yet!"
+
 
 def main(url):
+    print "[*] Collecting Information about zip."
     total_file_size = int(get_filesize_url(url))
     print "[*] total file size:", readable_size(total_file_size)
 
@@ -318,38 +317,29 @@ def main(url):
     size_cd = endrec[_ECD_SIZE]  # bytes in central directory
     offset_cd = endrec[_ECD_OFFSET]  # offset of central directory
 
-    print "[*] size of the central directory ", readable_size(size_cd), "offset", readable_size(offset_cd)
+    if DEBUG:
+        print "[*] size of the central directory ", readable_size(size_cd), "offset", readable_size(offset_cd)
 
     central_directory = get_central_directory(url, size_cd, offset_cd)
     concat = endrec[_ECD_LOCATION] - size_cd - offset_cd
-    print "[!!] concat", concat
     file_list = parse_central_directory(central_directory)
 
-    for x in file_list:
-        print x.filename
-        if x.filename.find(".app/Info.plist") != -1:
-            print "[***] file found", x.filename, "header offset:", x.header_offset, "compressed size:", x.compress_size, "file size:", x.file_size
-            data = local_header_parse(url, x)
-            info_plist = biplist.readPlistFromString(data)
 
-            if not info_plist:
-                print "[!!]  Error getting info plist"
-                return None
-            # break
-            urlschemes = []
-            if info_plist.has_key('CFBundleURLTypes'):
-                for urltype in info_plist['CFBundleURLTypes']:
-                    if urltype.has_key('CFBundleURLSchemes'):
-                        urlschemes.extend(urltype['CFBundleURLSchemes'])
-            else:
-                print "[!!]  NO URL SCHEME!! What a waste!!"
-
-            print urlschemes
-            return [info_plist['CFBundleName']].extend(urlschemes)
-        # break
+    print_files(file_list)
+    # for x in file_list:
+    #     print "flag bits",x.flag_bits
+    #     print "compress type:",x.compress_type
+    #     print "[***] file found", x.filename, "header offset:", x.header_offset, "compressed size:", readable_size(x.compress_size), "file size:", readable_size(x.file_size)
+    #     # data = get_file_from_zip(url, x)
+    #     if x.filename == "kernelcache.release.n42":
+    #         save_zip_to_file(url , x , "/Users/better/Desktop/kernelcache.release.n42")
 
         # data = get_data(url , x.header_offset , 128)
         # hexdump(data)
+
+def main_2():
+    pass
+
 
 
 if __name__ == '__main__':
