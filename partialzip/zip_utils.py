@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import cStringIO
 import struct
 import os
 import sys
