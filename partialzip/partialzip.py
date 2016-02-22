@@ -18,9 +18,9 @@ class ZippedFile:
         self.dir_name = zip_info.filename
         self.compressed_size = zip_info.compress_size
         self.uncompressed_size = zip_info.file_size
-
-        self.deflated = True if zip_info.compress_type == zip_utils.ZIP_DEFLATED else False
-
+        self.is_file = zip_info.flag_bits == 0x8
+        self.is_dir = zip_info.flag_bits == 0x0
+        self.deflated = zip_info.compress_type == zip_utils.ZIP_DEFLATED
 
 class PartialZip:
     def __init__(self, zip_url):
@@ -28,18 +28,6 @@ class PartialZip:
         self.filesize = int(utils.get_filesize_url(url))
         self._all_zip_infos = None
         self._zipped_files = None
-
-    def _parse_zip_central_directory(self):
-        endrec = self._get_end_record_data()
-        size_cd = endrec[zip_utils._ECD_SIZE]  # bytes in central directory
-        offset_cd = endrec[zip_utils._ECD_OFFSET]  # offset of central directory
-
-        if DEBUG:
-            print "[*] size of the central directory ", utils.readable_size(size_cd), "offset", utils.readable_size(
-                offset_cd)
-
-        central_directory = self._get_central_directory(size_cd, offset_cd)
-        self._all_zip_infos, self._zipped_files = self._parse_central_directory(central_directory)
 
     def _zip_infos(self):
         if not self._all_zip_infos:
@@ -51,23 +39,7 @@ class PartialZip:
     def zipped_files(self):
         if not self._zipped_files:
             self._parse_zip_central_directory()
-        return  self._zipped_files
-
-    def _print_files(self, file_list, pretty=False):
-        if not pretty:
-            for x in file_list:
-                if x.flag_bits == 0x8:
-                    print "[*] File:", x.filename, "compressed size:", utils.readable_size(
-                        x.compress_size), "actual size:", utils.readable_size(x.file_size)
-                elif x.flag_bits == 0:
-                    print "[*] Directory:", x.filename
-                else:
-                    print "[!] Unknown type", x.filename
-        else:
-            print "[:(] not implemented yet!"
-
-    def print_files(self):
-        self._print_files(self._zip_infos())
+        return self._zipped_files
 
     def _get_end_record_data(self):
         if DEBUG:
@@ -100,6 +72,7 @@ class PartialZip:
             print "[*] size of the central directory:", len(cd)
         # hexdump(cd)
         return cd
+
     # directly taken from the python standard library ZipFile class
     def _parse_central_directory(self, data):
         size_cd = len(data)
@@ -148,19 +121,46 @@ class PartialZip:
                      + centdir[zip_utils._CD_EXTRA_FIELD_LENGTH]
                      + centdir[zip_utils._CD_COMMENT_LENGTH])
 
+        return filelist, zipped_files
 
-        return filelist , zipped_files
+    def _parse_zip_central_directory(self):
+        endrec = self._get_end_record_data()
+        size_cd = endrec[zip_utils._ECD_SIZE]  # bytes in central directory
+        offset_cd = endrec[zip_utils._ECD_OFFSET]  # offset of central directory
 
+        if DEBUG:
+            print "[*] size of the central directory ", utils.readable_size(size_cd), "offset", utils.readable_size(
+                    offset_cd)
 
-def main(url):
+        central_directory = self._get_central_directory(size_cd, offset_cd)
+        self._all_zip_infos, self._zipped_files = self._parse_central_directory(central_directory)
+
+def list_contents(url):
     pz = PartialZip(url)
-    pz.print_files()
+    pz.zipped_files
+    utils.print_files(pz, pretty=True)
 
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('options', choices=['list', 'download'])
+    parser.add_argument('-o', '--output', metavar='<file>',
+                        help="file path to save the output or - for stdout", nargs=1)
+    parser.add_argument('url', metavar='<url>', nargs=1)
+
+    args = parser.parse_args()
+
     if len(sys.argv) > 1:
-        url = sys.argv[1]
+        url = args.url[0]
+        selected_option = args.options
+
+        if selected_option == 'list':
+            list_contents(url)
+
+        elif selected_option == 'download':
+            pass
+
     else:
         url = "http://appldnld.apple.com/ios9.2/031-29213-20151203-67549F46-8D8A-11E5-96EE-63618B8BECEB/iPhone5,2_9.2_13C75_Restore.ipsw"
-
-    main(url)
+        list_contents(url)
